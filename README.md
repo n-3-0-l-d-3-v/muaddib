@@ -1,8 +1,12 @@
-# impossible-kernel — THE KERNEL
+# MUADDIB — THE KERNEL
 
 > A capability-based OS with no filesystem hierarchy and no wall clock.
 
-Part of **[The Impossible Computer](https://github.com/n-3-0-l-d-3-v/impossible-computer)** — a constrained computing
+## Why "MUADDIB"
+
+Paul's chosen Fremen name, taken from the desert mouse — an animal known for surviving without ever needing open water, because it adapted by removing a requirement every other creature depends on. That is the kernel's entire design: an operating environment that runs without the filesystem hierarchy and the wall clock every other OS assumes it needs, having adapted around their absence instead of faking them.
+
+Part of **[ARRAKIS](https://github.com/n-3-0-l-d-3-v/arrakis)** — a constrained computing
 ecosystem built by removing assumptions ordinary computers depend on. This
 repository is developed standalone and mirrored into the combined ecosystem
 repo commit-for-commit.
@@ -29,14 +33,14 @@ Capability passing, IPC, logical/vector clocks for ordering, and object-referenc
 
 ## Sibling repositories
 
-- [impossible-machine](https://github.com/n-3-0-l-d-3-v/impossible-machine) — THE MACHINE (ACTIVE)
-- [impossible-language](https://github.com/n-3-0-l-d-3-v/impossible-language) — THE LANGUAGE (QUEUED)
-- [impossible-vault](https://github.com/n-3-0-l-d-3-v/impossible-vault) — THE VAULT (QUEUED)
-- [impossible-database](https://github.com/n-3-0-l-d-3-v/impossible-database) — THE DATABASE (QUEUED)
-- [impossible-wire](https://github.com/n-3-0-l-d-3-v/impossible-wire) — THE WIRE (QUEUED)
-- [impossible-colony](https://github.com/n-3-0-l-d-3-v/impossible-colony) — THE COLONY (QUEUED)
-- [impossible-history](https://github.com/n-3-0-l-d-3-v/impossible-history) — THE HISTORY (QUEUED)
-- [impossible-artifact](https://github.com/n-3-0-l-d-3-v/impossible-artifact) — THE ARTIFACT (STRETCH)
+- [mentat](https://github.com/n-3-0-l-d-3-v/mentat) — THE MACHINE (COMPLETE)
+- [chakobsa](https://github.com/n-3-0-l-d-3-v/chakobsa) — THE LANGUAGE (QUEUED)
+- [sietch](https://github.com/n-3-0-l-d-3-v/sietch) — THE VAULT (ACTIVE)
+- [choam](https://github.com/n-3-0-l-d-3-v/choam) — THE DATABASE (QUEUED)
+- [distrans](https://github.com/n-3-0-l-d-3-v/distrans) — THE WIRE (QUEUED)
+- [landsraad](https://github.com/n-3-0-l-d-3-v/landsraad) — THE COLONY (QUEUED)
+- [ghola](https://github.com/n-3-0-l-d-3-v/ghola) — THE HISTORY (QUEUED)
+- [shai-hulud](https://github.com/n-3-0-l-d-3-v/shai-hulud) — THE ARTIFACT (STRETCH)
 
 ## Development
 
