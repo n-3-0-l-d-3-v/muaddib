@@ -1,0 +1,17 @@
+[package]
+name = "workload"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+capability = { path = "../capability" }
+process = { path = "../process" }
+ipc = { path = "../ipc" }
+memory = { path = "../memory" }
+clock = { path = "../clock" }
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
