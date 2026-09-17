@@ -40,6 +40,20 @@ anywhere in it. 12 unit tests plus 2 property tests, proven for
 arbitrary rights combinations and transfer-chain lengths. See
 [ADR-002](docs/design/decisions/ADR-002-processes-and-scheduling.md).
 
+**Ticket 003 (IPC) is done.** `crates/ipc`: channels are ordinary
+`capability` objects (`WRITE` = may send, `READ` = may receive — the
+first real meaning given to ticket 001's previously-uninterpreted
+rights bits), and sending a capability reuses ticket 002's grant-
+resolution machinery directly rather than a parallel implementation — a
+discovery made while building this ticket, not planned in advance:
+spawning a child with attenuated authority and sending a capability
+over a channel are the same operation shape. A sent-but-unreceived
+capability provably exists in *no* process's table at all, only in the
+channel's own queue. 7 unit tests plus 2 property tests prove a
+received capability can never exceed what the sender held, for
+arbitrary rights and arbitrary-length relay chains across multiple
+channels. See [ADR-003](docs/design/decisions/ADR-003-ipc.md).
+
 See [tickets/](tickets/) for the live phase-by-phase ticket board and
 [docs/design/](docs/design/) for constraints, invariants and architecture
 decision records.
