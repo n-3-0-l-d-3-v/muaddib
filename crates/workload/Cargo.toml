@@ -14,6 +14,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+criterion = "0.5"
 
 
 [[bin]]
@@ -23,3 +24,7 @@ path = "src/bin/muaddib-chaos.rs"
 [[bin]]
 name = "muaddib-pipeline"
 path = "src/bin/muaddib-pipeline.rs"
+
+[[bench]]
+name = "cost_of_security"
+harness = false
