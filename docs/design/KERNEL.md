@@ -41,6 +41,11 @@ crates/clock        -- logical (Lamport) and vector clocks; the only
                         allowed to use. Every process owns one; IPC
                         send/receive and spawn are stamped events
                         (ticket 005)
+crates/workload     -- the closing workload: a least-privilege pipeline
+                        over every crate above, its ambient-authority
+                        twin, a seeded chaos harness, the muaddib-chaos /
+                        muaddib-pipeline binaries, and cost-of-security
+                        benchmarks (ticket 006)
 ```
 
 Each crate is usable independently (as sietch's `storage` crate proved
@@ -72,6 +77,17 @@ pattern.
   graph, through real spawns and IPC).
 - **No physical time**: no kernel source uses a physical-time API
   (enforced by `clock/tests/no_wall_clock.rs`).
+- **All of the above under arbitrary interleavings**: a seeded chaos
+  harness checks every one against an independent model after every step,
+  and it is mutation-checked (ADR-006).
+
+## Measured cost
+
+From ADR-006: the full kernel costs 17.4× an ambient-authority twin of
+the same pipeline at 64-byte messages and 1.35× at 4096-byte ones.
+Logical clocks account for 4.3× of the small-message cost. A capability
+check is ~9 ns (live or revoked). Vector-clock cost grows linearly with
+the number of processes a process has heard from.
 
 ## What this is not
 

@@ -13,7 +13,7 @@ repo commit-for-commit.
 
 ## Status
 
-**Phase 4 — ACTIVE.** See [docs/design/KERNEL.md](docs/design/KERNEL.md)
+**Phase 4 — COMPLETE.** All six tickets are done. See [docs/design/KERNEL.md](docs/design/KERNEL.md)
 for the full architecture (capability model -> processes -> IPC ->
 memory ownership -> logical clocks) and what this simulation deliberately
 is and isn't.
@@ -88,6 +88,27 @@ The "no wall clock" constraint is now a test too: the build fails if any
 kernel source uses a physical-time API. See
 [ADR-005](docs/design/decisions/ADR-005-logical-clocks.md).
 
+**Ticket 006 (integration and benchmarks) is done.** `crates/workload`
+contains a real pipeline over the whole kernel. A supervisor spawns
+least-privilege stages, a pool of memory regions circulates the ring
+(every hop is a `Grant::Move`), and every event is stamped with no
+physical time anywhere. Alongside it is an ambient-authority twin of the
+same pipeline. A differential test requires kernel, twin and a direct
+reference to agree exactly. The measured cost of the discipline is
+**17.4×** end to end at 64-byte regions and **1.35×** at page-sized ones.
+Logical clocks alone are 4.3×. A capability check is ~9 ns whether live
+or revoked, so checks are a small share; per-hop bookkeeping and O(n)
+vector clocks (495 ns → 9.09 µs per hop from 1 to 256 known processes)
+are the real costs. A seeded chaos harness drives every operation,
+including revocation mid-transfer and replay of every stale capability,
+against an independent model with exact-result predictions. It ran
+500 seeds × 1000 steps clean and catches all six deliberately
+re-introduced kernel bugs. `muaddib-chaos --seed N` replays any failure.
+Building the pipeline also exposed two workload bugs, both fixed: a
+schedule that serialized the whole run, and a LIFO pool that left regions
+idle. See
+[ADR-006](docs/design/decisions/ADR-006-integration-and-benchmarks.md).
+
 See [tickets/](tickets/) for the live phase-by-phase ticket board and
 [docs/design/](docs/design/) for constraints, invariants and architecture
 decision records.
@@ -124,5 +145,7 @@ bar every piece of this repo must clear before it is considered complete.
 ```bash
 cargo build
 cargo test
-cargo bench
+cargo bench -p workload --bench cost_of_security
+cargo run --release -p workload --bin muaddib-pipeline -- --trace
+cargo run --release -p workload --bin muaddib-chaos -- --runs 100 --steps 1000
 ```
