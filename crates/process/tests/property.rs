@@ -44,7 +44,7 @@ proptest! {
         let mut current_handle = s.process(current).unwrap().handles().next().unwrap();
 
         for _ in 0..chain_length {
-            let next = s.spawn_child(&k, current, vec![Grant::Transfer(current_handle)]).unwrap();
+            let next = s.spawn_child(&mut k, current, vec![Grant::Transfer(current_handle)]).unwrap();
 
             // The old holder must have lost it...
             prop_assert_eq!(s.process(current).unwrap().handle_count(), 0);
@@ -74,7 +74,7 @@ proptest! {
         let handle = s.process(parent).unwrap().handles().next().unwrap();
 
         for req in &requested {
-            let result = s.spawn_child(&k, parent, vec![Grant::Derive(handle, *req)]);
+            let result = s.spawn_child(&mut k, parent, vec![Grant::Derive(handle, *req)]);
             match result {
                 Ok(child) => {
                     let child_handle = s.process(child).unwrap().handles().next().unwrap();

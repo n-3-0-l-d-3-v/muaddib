@@ -8,4 +8,4 @@ mod transfer;
 
 pub use process::{Handle, Process, ProcessId};
 pub use scheduler::{ProcessError, Scheduler};
-pub use transfer::{apply_transfers, resolve_grants, Grant, GrantError};
+pub use transfer::{apply_grants, resolve_grants, Grant, GrantError};

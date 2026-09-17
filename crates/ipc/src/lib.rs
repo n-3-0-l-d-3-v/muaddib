@@ -5,7 +5,7 @@
 //! ticket 001 defined without prescribing their meaning, given real
 //! meaning here); a message can carry other capabilities as payload,
 //! resolved through exactly the same `process::resolve_grants`/
-//! `apply_transfers` machinery ticket 002's `Scheduler::spawn_child`
+//! `apply_grants` machinery ticket 002's `Scheduler::spawn_child`
 //! already uses — sending a capability and granting one to a spawned
 //! child are the same operation shape (see
 //! `docs/design/decisions/ADR-003-ipc.md`).
@@ -13,7 +13,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use capability::{CapError, Capability, Kernel, ObjectId, Rights};
-use process::{apply_transfers, resolve_grants, Grant, GrantError, Process};
+use process::{apply_grants, resolve_grants, Grant, GrantError, Process};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
@@ -65,9 +65,13 @@ impl ChannelRegistry {
     /// not the sender's (a `Transfer` already removed them), not the
     /// receiver's (it hasn't called `receive` yet) — only inside this
     /// registry, exactly modeling a message genuinely in flight.
+    ///
+    /// Takes `&mut Kernel` because a `Grant::Move` in `grants` reissues
+    /// the moved object: the only live capability for it is then the one
+    /// inside this message.
     pub fn send(
         &mut self,
-        kernel: &Kernel,
+        kernel: &mut Kernel,
         channel: &Capability,
         sender: &mut Process,
         grants: Vec<Grant>,
@@ -80,7 +84,7 @@ impl ChannelRegistry {
             .ok_or(IpcError::UnknownChannel(channel.object()))?;
 
         let resolved = resolve_grants(kernel, sender, &grants)?;
-        apply_transfers(sender, &grants);
+        let resolved = apply_grants(kernel, sender, &grants, resolved);
         queue.push_back(Message {
             data,
             capabilities: resolved,
@@ -135,7 +139,7 @@ mod tests {
 
         {
             let sender = sched.process_mut(sender_id).unwrap();
-            reg.send(&k, &channel, sender, vec![], 42).unwrap();
+            reg.send(&mut k, &channel, sender, vec![], 42).unwrap();
         }
         let receiver = sched.process_mut(receiver_id).unwrap();
         assert_eq!(reg.receive(&k, &channel, receiver).unwrap(), Some(42));
@@ -152,7 +156,7 @@ mod tests {
         let read_only = k.derive(&full, Rights::READ).unwrap();
 
         let sender = sched.process_mut(sender_id).unwrap();
-        let result = reg.send(&k, &read_only, sender, vec![], 1);
+        let result = reg.send(&mut k, &read_only, sender, vec![], 1);
         assert!(matches!(
             result,
             Err(IpcError::Capability(CapError::InsufficientRights { .. }))
@@ -174,7 +178,7 @@ mod tests {
         {
             let sender = sched.process_mut(sender_id).unwrap();
             reg.send(
-                &k,
+                &mut k,
                 &channel,
                 sender,
                 vec![Grant::Transfer(payload_handle)],
@@ -208,7 +212,7 @@ mod tests {
         {
             let sender = sched.process_mut(sender_id).unwrap();
             reg.send(
-                &k,
+                &mut k,
                 &channel,
                 sender,
                 vec![Grant::Derive(payload_handle, Rights::READ)],
@@ -241,7 +245,7 @@ mod tests {
         {
             let sender = sched.process_mut(sender_id).unwrap();
             reg.send(
-                &k,
+                &mut k,
                 &channel,
                 sender,
                 vec![Grant::Transfer(payload_handle)],
@@ -269,7 +273,7 @@ mod tests {
 
         let sender = sched.process_mut(sender_id).unwrap();
         let result = reg.send(
-            &k,
+            &mut k,
             &channel,
             sender,
             vec![Grant::Derive(payload_handle, Rights::READ | Rights::WRITE)],
@@ -283,6 +287,58 @@ mod tests {
         ));
         assert_eq!(sender.capability(payload_handle), Some(payload_cap));
         assert_eq!(reg.queue_len(&channel), Some(0));
+    }
+
+    #[test]
+    fn a_moved_capability_is_the_only_live_one_and_in_flight_views_arrive_dead() {
+        let mut k = Kernel::new();
+        let mut reg = ChannelRegistry::new();
+        let mut sched = Scheduler::new();
+
+        let owned = k.new_object(Rights::ALL);
+        let owner_id = sched.spawn(vec![owned]);
+        let bystander_id = sched.spawn(vec![]);
+        let new_owner_id = sched.spawn(vec![]);
+        let views = reg.new_channel(&mut k);
+        let handoff = reg.new_channel(&mut k);
+        let handle = sched.process(owner_id).unwrap().handles().next().unwrap();
+
+        {
+            let owner = sched.process_mut(owner_id).unwrap();
+            // A read view, still in flight when ownership moves.
+            reg.send(
+                &mut k,
+                &views,
+                owner,
+                vec![Grant::Derive(handle, Rights::READ)],
+                0,
+            )
+            .unwrap();
+            reg.send(&mut k, &handoff, owner, vec![Grant::Move(handle)], 0)
+                .unwrap();
+        }
+        // While the move is in flight, even the pre-move value is dead.
+        assert_eq!(
+            k.check(&owned, Rights::NONE),
+            Err(CapError::Revoked(owned.object()))
+        );
+
+        let bystander = sched.process_mut(bystander_id).unwrap();
+        reg.receive(&k, &views, bystander).unwrap();
+        let view = bystander
+            .capability(bystander.handles().next().unwrap())
+            .unwrap();
+        assert_eq!(
+            k.check(&view, Rights::READ),
+            Err(CapError::Revoked(owned.object()))
+        );
+
+        let new_owner = sched.process_mut(new_owner_id).unwrap();
+        reg.receive(&k, &handoff, new_owner).unwrap();
+        let moved = new_owner
+            .capability(new_owner.handles().next().unwrap())
+            .unwrap();
+        assert_eq!(k.check(&moved, Rights::ALL), Ok(()));
     }
 
     #[test]

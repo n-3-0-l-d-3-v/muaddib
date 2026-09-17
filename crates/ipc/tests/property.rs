@@ -49,7 +49,7 @@ proptest! {
 
         let send_result = {
             let sender = sched.process_mut(sender_id).unwrap();
-            reg.send(&k, &channel, sender, vec![Grant::Derive(handle, requested)], 0)
+            reg.send(&mut k, &channel, sender, vec![Grant::Derive(handle, requested)], 0)
         };
 
         match send_result {
@@ -94,7 +94,7 @@ proptest! {
 
             {
                 let sender = sched.process_mut(holder).unwrap();
-                reg.send(&k, &channel, sender, vec![Grant::Transfer(handle)], 0).unwrap();
+                reg.send(&mut k, &channel, sender, vec![Grant::Transfer(handle)], 0).unwrap();
             }
             prop_assert_eq!(sched.process(holder).unwrap().handle_count(), 0);
             prop_assert_eq!(reg.queue_len(&channel), Some(1));

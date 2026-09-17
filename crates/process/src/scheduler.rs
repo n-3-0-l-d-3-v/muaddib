@@ -11,7 +11,7 @@ use std::collections::{HashMap, VecDeque};
 use capability::{Capability, Kernel};
 
 use crate::process::{Process, ProcessId};
-use crate::transfer::{apply_transfers, resolve_grants, GrantError};
+use crate::transfer::{apply_grants, resolve_grants, GrantError};
 
 pub use crate::transfer::Grant;
 
@@ -75,9 +75,12 @@ impl Scheduler {
     /// handle exists; a `Derive` would actually succeed) before any of
     /// them are applied, so a single invalid grant can never leave the
     /// parent partially stripped of a capability it named.
+    ///
+    /// Takes `&mut Kernel` because a `Grant::Move` reissues the moved
+    /// object, revoking every other capability for it.
     pub fn spawn_child(
         &mut self,
-        kernel: &Kernel,
+        kernel: &mut Kernel,
         parent: ProcessId,
         grants: Vec<Grant>,
     ) -> Result<ProcessId, ProcessError> {
@@ -88,10 +91,13 @@ impl Scheduler {
         let resolved = resolve_grants(kernel, parent_proc, &grants)?;
 
         // Every grant validated; now actually apply. Transfers remove
-        // from the parent's table only now, never during validation.
-        apply_transfers(
+        // from the parent's table (and moves reissue) only now, never
+        // during validation.
+        let resolved = apply_grants(
+            kernel,
             self.processes.get_mut(&parent).expect("checked above"),
             &grants,
+            resolved,
         );
 
         let child_id = self.fresh_id();
@@ -163,7 +169,7 @@ mod tests {
         let handle = s.process(parent).unwrap().handles().next().unwrap();
 
         let child = s
-            .spawn_child(&k, parent, vec![Grant::Transfer(handle)])
+            .spawn_child(&mut k, parent, vec![Grant::Transfer(handle)])
             .unwrap();
 
         assert_eq!(s.process(parent).unwrap().handle_count(), 0);
@@ -180,7 +186,7 @@ mod tests {
         let handle = s.process(parent).unwrap().handles().next().unwrap();
 
         let child = s
-            .spawn_child(&k, parent, vec![Grant::Derive(handle, Rights::READ)])
+            .spawn_child(&mut k, parent, vec![Grant::Derive(handle, Rights::READ)])
             .unwrap();
 
         // Parent still has its own, unweakened capability.
@@ -201,7 +207,7 @@ mod tests {
         let handle = s.process(parent).unwrap().handles().next().unwrap();
 
         let result = s.spawn_child(
-            &k,
+            &mut k,
             parent,
             vec![Grant::Derive(handle, Rights::READ | Rights::WRITE)],
         );
@@ -227,7 +233,7 @@ mod tests {
         // A batch mixing one valid transfer with one invalid handle must
         // apply *none* of it — including the valid transfer.
         let result = s.spawn_child(
-            &k,
+            &mut k,
             parent,
             vec![Grant::Transfer(valid_handle), Grant::Transfer(bogus_handle)],
         );
@@ -237,6 +243,29 @@ mod tests {
             Some(cap)
         );
         assert_eq!(s.process(parent).unwrap().handle_count(), 1);
+    }
+
+    #[test]
+    fn spawn_child_via_move_leaves_the_parent_no_working_copy() {
+        let mut k = Kernel::new();
+        let mut s = Scheduler::new();
+        let cap = k.new_object(Rights::ALL);
+        let parent = s.spawn(vec![cap]);
+        let handle = s.process(parent).unwrap().handles().next().unwrap();
+        let stashed = s.process(parent).unwrap().capability(handle).unwrap();
+
+        let child = s
+            .spawn_child(&mut k, parent, vec![Grant::Move(handle)])
+            .unwrap();
+
+        assert_eq!(s.process(parent).unwrap().handle_count(), 0);
+        assert_eq!(
+            k.check(&stashed, Rights::NONE),
+            Err(CapError::Revoked(cap.object()))
+        );
+        let child_handle = s.process(child).unwrap().handles().next().unwrap();
+        let child_cap = s.process(child).unwrap().capability(child_handle).unwrap();
+        assert_eq!(k.check(&child_cap, Rights::ALL), Ok(()));
     }
 
     #[test]
@@ -253,11 +282,11 @@ mod tests {
 
     #[test]
     fn spawn_child_of_an_unknown_parent_is_a_typed_error() {
-        let k = Kernel::new();
+        let mut k = Kernel::new();
         let mut s = Scheduler::new();
         let bogus = ProcessId(999);
         assert_eq!(
-            s.spawn_child(&k, bogus, vec![]),
+            s.spawn_child(&mut k, bogus, vec![]),
             Err(ProcessError::UnknownProcess(bogus))
         );
     }
