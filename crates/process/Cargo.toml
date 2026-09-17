@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 capability = { path = "../capability" }
+clock = { path = "../clock" }
 thiserror.workspace = true
 
 [dev-dependencies]

@@ -93,15 +93,16 @@ impl Scheduler {
         // Every grant validated; now actually apply. Transfers remove
         // from the parent's table (and moves reissue) only now, never
         // during validation.
-        let resolved = apply_grants(
-            kernel,
-            self.processes.get_mut(&parent).expect("checked above"),
-            &grants,
-            resolved,
-        );
+        let parent_proc = self.processes.get_mut(&parent).expect("checked above");
+        let resolved = apply_grants(kernel, parent_proc, &grants, resolved);
+        // Spawning is causally a send from the parent that the child's
+        // first event receives: everything the parent had seen precedes
+        // everything the child will do.
+        let spawned_at = parent_proc.record_send();
 
         let child_id = self.fresh_id();
         let mut child = Process::new(child_id);
+        child.record_receive(&spawned_at);
         for cap in resolved {
             child.grant(cap);
         }
@@ -266,6 +267,35 @@ mod tests {
         let child_handle = s.process(child).unwrap().handles().next().unwrap();
         let child_cap = s.process(child).unwrap().capability(child_handle).unwrap();
         assert_eq!(k.check(&child_cap, Rights::ALL), Ok(()));
+    }
+
+    #[test]
+    fn a_childs_first_event_follows_everything_its_parent_did_before_spawning() {
+        let mut k = Kernel::new();
+        let mut s = Scheduler::new();
+        let parent = s.spawn(vec![]);
+        let before = s.process_mut(parent).unwrap().record_local_event();
+
+        let child = s.spawn_child(&mut k, parent, vec![]).unwrap();
+        let birth = s.process(child).unwrap().clock();
+        let parent_after = s.process_mut(parent).unwrap().record_local_event();
+
+        assert!(before.happened_before(&birth));
+        // The parent's later events are concurrent with the child's birth,
+        // not after it: the child never told the parent anything.
+        assert!(birth.vector().concurrent_with(parent_after.vector()));
+    }
+
+    #[test]
+    fn a_failed_spawn_records_no_event() {
+        let mut k = Kernel::new();
+        let mut s = Scheduler::new();
+        let parent = s.spawn(vec![]);
+        let bogus = crate::process::Handle(7);
+        assert!(s
+            .spawn_child(&mut k, parent, vec![Grant::Transfer(bogus)])
+            .is_err());
+        assert_eq!(s.process(parent).unwrap().clock().lamport(), 0);
     }
 
     #[test]

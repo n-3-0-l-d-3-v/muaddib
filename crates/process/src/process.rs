@@ -12,6 +12,9 @@
 use std::collections::HashMap;
 
 use capability::Capability;
+use clock::EventClock;
+
+use crate::Stamp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProcessId(pub(crate) u64);
@@ -26,6 +29,9 @@ pub struct Process {
     id: ProcessId,
     capabilities: HashMap<Handle, Capability>,
     next_handle: u32,
+    /// This process's Lamport and vector clocks (ticket 005). Advanced
+    /// only by events: IPC sends/receives, spawns, explicit local events.
+    clock: EventClock<ProcessId>,
 }
 
 impl Process {
@@ -34,6 +40,7 @@ impl Process {
             id,
             capabilities: HashMap::new(),
             next_handle: 0,
+            clock: EventClock::new(id),
         }
     }
 
@@ -78,6 +85,30 @@ impl Process {
     pub fn handle_count(&self) -> usize {
         self.capabilities.len()
     }
+
+    /// The stamp of this process's most recent event.
+    pub fn clock(&self) -> Stamp {
+        self.clock.current()
+    }
+
+    /// Records a purely local event (e.g. a computation step a workload
+    /// wants causally ordered) and returns its stamp.
+    pub fn record_local_event(&mut self) -> Stamp {
+        self.clock.local_event()
+    }
+
+    /// Records a send event; the returned stamp travels with whatever was
+    /// sent. Called by `Scheduler::spawn_child` and `ipc::send`.
+    pub fn record_send(&mut self) -> Stamp {
+        self.clock.send_event()
+    }
+
+    /// Records receiving something stamped `sent`. `Stamp` has no public
+    /// constructor, so `sent` is always a real event's stamp — a process
+    /// can't claim knowledge of events nobody told it about.
+    pub fn record_receive(&mut self, sent: &Stamp) -> Stamp {
+        self.clock.receive_event(sent)
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +140,17 @@ mod tests {
         assert_eq!(p.take(handle), Some(cap));
         assert_eq!(p.capability(handle), None);
         assert_eq!(p.take(handle), None); // already gone
+    }
+
+    #[test]
+    fn a_new_process_has_no_events_and_events_advance_its_clock() {
+        let mut p = Process::new(ProcessId(4));
+        assert_eq!(p.clock().lamport(), 0);
+        let s = p.record_local_event();
+        assert_eq!(s.process(), ProcessId(4));
+        assert_eq!(s.lamport(), 1);
+        assert_eq!(s.vector().get(ProcessId(4)), 1);
+        assert_eq!(p.clock(), s);
     }
 
     #[test]
