@@ -130,6 +130,32 @@ impl Kernel {
         Ok(())
     }
 
+    /// Revokes every outstanding capability for `cap`'s object — `cap`
+    /// included — and returns a single fresh capability with exactly
+    /// `cap`'s rights at the new epoch. This is the kernel half of an
+    /// **exclusive ownership handoff**: whoever receives the returned
+    /// capability is provably the only party with any authority over the
+    /// object, no matter how many copies of `cap` (or views derived from
+    /// it) anyone kept. Same authority requirement as `revoke` — `cap`
+    /// must be live and hold `DESTROY` — since it is a revoke.
+    pub fn reissue(&mut self, cap: &Capability) -> Result<Capability, CapError> {
+        self.revoke(cap)?;
+        Ok(Capability {
+            object: cap.object,
+            rights: cap.rights,
+            epoch: self.epochs[&cap.object],
+        })
+    }
+
+    /// True if `object` has been allocated by this kernel and not yet
+    /// destroyed. Grants no authority — an `ObjectId` is a name, not a
+    /// capability — and exists so registries holding per-object data
+    /// (memory regions, channel queues) can tell when an object was
+    /// destroyed out from under them.
+    pub fn object_exists(&self, object: ObjectId) -> bool {
+        self.epochs.contains_key(&object)
+    }
+
     /// Derives a new capability for the same object with `requested`
     /// rights — **strictly attenuation**: `cap` must currently be valid,
     /// must hold `GRANT`, and `requested` must be a subset of what `cap`
@@ -308,6 +334,51 @@ mod tests {
         // at the new epoch — exactly how an old owner could sabotage a
         // new one after an ownership transfer).
         assert_eq!(k.revoke(&old), Err(CapError::Revoked(old.object())));
+    }
+
+    #[test]
+    fn reissue_invalidates_every_other_copy_and_derived_view() {
+        let mut k = Kernel::new();
+        let owner = k.new_object(Rights::ALL);
+        let stashed_copy = owner;
+        let view = k.derive(&owner, Rights::READ).unwrap();
+
+        let fresh = k.reissue(&owner).unwrap();
+
+        assert_eq!(fresh.object(), owner.object());
+        assert_eq!(fresh.rights(), owner.rights());
+        assert_eq!(k.check(&fresh, Rights::ALL), Ok(()));
+        for stale in [owner, stashed_copy, view] {
+            assert_eq!(
+                k.check(&stale, Rights::NONE),
+                Err(CapError::Revoked(owner.object()))
+            );
+        }
+    }
+
+    #[test]
+    fn reissue_requires_a_live_destroy_holding_capability() {
+        let mut k = Kernel::new();
+        let owner = k.new_object(Rights::ALL);
+        let view = k.derive(&owner, Rights::READ | Rights::WRITE).unwrap();
+        assert!(k.reissue(&view).is_err());
+
+        let fresh = k.reissue(&owner).unwrap();
+        // The old owner can't reissue again to steal authority back.
+        assert_eq!(k.reissue(&owner), Err(CapError::Revoked(owner.object())));
+        assert_eq!(k.check(&fresh, Rights::ALL), Ok(()));
+    }
+
+    #[test]
+    fn object_exists_tracks_allocation_and_destruction() {
+        let mut k = Kernel::new();
+        let cap = k.new_object(Rights::DESTROY);
+        assert!(k.object_exists(cap.object()));
+        k.revoke(&cap).ok();
+        assert!(k.object_exists(cap.object())); // revoked is not destroyed
+        let fresh = k.new_object(Rights::DESTROY);
+        k.destroy_object(&fresh).unwrap();
+        assert!(!k.object_exists(fresh.object()));
     }
 
     #[test]
