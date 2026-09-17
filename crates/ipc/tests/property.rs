@@ -53,7 +53,7 @@ proptest! {
         };
 
         match send_result {
-            Ok(()) => {
+            Ok(_) => {
                 let receiver = sched.process_mut(receiver_id).unwrap();
                 reg.receive(&k, &channel, receiver).unwrap();
                 let received_handle = receiver.handles().next().unwrap();

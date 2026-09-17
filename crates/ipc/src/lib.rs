@@ -13,12 +13,28 @@
 use std::collections::{HashMap, VecDeque};
 
 use capability::{CapError, Capability, Kernel, ObjectId, Rights};
-use process::{apply_grants, resolve_grants, Grant, GrantError, Process};
+use process::{apply_grants, resolve_grants, Grant, GrantError, Process, Stamp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
     pub data: i64,
     pub capabilities: Vec<Capability>,
+    /// The sender's send-event stamp (ticket 005) — how the receiver
+    /// learns what the sender had causally seen.
+    pub sent_at: Stamp,
+}
+
+/// What `receive` hands back: the payload data, plus both ends' logical
+/// timestamps. (Carried capabilities go straight into the receiver's
+/// table, never through this value.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delivery {
+    pub data: i64,
+    /// The send event's stamp, as recorded at the sender.
+    pub sent_at: Stamp,
+    /// The receive event's stamp, as recorded at the receiver. Always
+    /// causally after `sent_at`.
+    pub received_at: Stamp,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -69,6 +85,10 @@ impl ChannelRegistry {
     /// Takes `&mut Kernel` because a `Grant::Move` in `grants` reissues
     /// the moved object: the only live capability for it is then the one
     /// inside this message.
+    ///
+    /// A successful send is one event at the sender: it advances the
+    /// sender's clocks and returns the send event's stamp, which travels
+    /// in the message. A rejected send records no event.
     pub fn send(
         &mut self,
         kernel: &mut Kernel,
@@ -76,7 +96,7 @@ impl ChannelRegistry {
         sender: &mut Process,
         grants: Vec<Grant>,
         data: i64,
-    ) -> Result<(), IpcError> {
+    ) -> Result<Stamp, IpcError> {
         kernel.check(channel, Rights::WRITE)?;
         let queue = self
             .queues
@@ -85,23 +105,28 @@ impl ChannelRegistry {
 
         let resolved = resolve_grants(kernel, sender, &grants)?;
         let resolved = apply_grants(kernel, sender, &grants, resolved);
+        let sent_at = sender.record_send();
         queue.push_back(Message {
             data,
             capabilities: resolved,
+            sent_at: sent_at.clone(),
         });
-        Ok(())
+        Ok(sent_at)
     }
 
     /// Receives the oldest queued message on `channel`, if any, granting
     /// every capability it carried directly into `receiver`'s table
     /// (via `Process::grant` — the only way a capability ever enters a
     /// table, per ticket 002's ADR-002). `channel` must grant `READ`.
+    ///
+    /// Receiving a message is one event at the receiver, merging the
+    /// sender's causal knowledge. Finding the queue empty is not an event.
     pub fn receive(
         &mut self,
         kernel: &Kernel,
         channel: &Capability,
         receiver: &mut Process,
-    ) -> Result<Option<i64>, IpcError> {
+    ) -> Result<Option<Delivery>, IpcError> {
         kernel.check(channel, Rights::READ)?;
         let queue = self
             .queues
@@ -114,7 +139,12 @@ impl ChannelRegistry {
         for cap in message.capabilities {
             receiver.grant(cap);
         }
-        Ok(Some(message.data))
+        let received_at = receiver.record_receive(&message.sent_at);
+        Ok(Some(Delivery {
+            data: message.data,
+            sent_at: message.sent_at,
+            received_at,
+        }))
     }
 
     pub fn queue_len(&self, channel: &Capability) -> Option<usize> {
@@ -142,8 +172,52 @@ mod tests {
             reg.send(&mut k, &channel, sender, vec![], 42).unwrap();
         }
         let receiver = sched.process_mut(receiver_id).unwrap();
-        assert_eq!(reg.receive(&k, &channel, receiver).unwrap(), Some(42));
+        let delivery = reg.receive(&k, &channel, receiver).unwrap().unwrap();
+        assert_eq!(delivery.data, 42);
         assert_eq!(reg.receive(&k, &channel, receiver).unwrap(), None); // drained
+    }
+
+    #[test]
+    fn a_delivery_is_stamped_causally_after_its_send() {
+        let mut k = Kernel::new();
+        let mut reg = ChannelRegistry::new();
+        let mut sched = Scheduler::new();
+        let sender_id = sched.spawn(vec![]);
+        let receiver_id = sched.spawn(vec![]);
+        let channel = reg.new_channel(&mut k);
+
+        let sent_at = reg
+            .send(
+                &mut k,
+                &channel,
+                sched.process_mut(sender_id).unwrap(),
+                vec![],
+                7,
+            )
+            .unwrap();
+        assert_eq!(sched.process(sender_id).unwrap().clock(), sent_at);
+
+        let receiver = sched.process_mut(receiver_id).unwrap();
+        let d = reg.receive(&k, &channel, receiver).unwrap().unwrap();
+        assert_eq!(d.sent_at, sent_at);
+        assert!(d.sent_at.happened_before(&d.received_at));
+        assert!(d.sent_at.lamport() < d.received_at.lamport());
+        assert_eq!(receiver.clock(), d.received_at);
+    }
+
+    #[test]
+    fn empty_receives_and_rejected_sends_record_no_events() {
+        let mut k = Kernel::new();
+        let mut reg = ChannelRegistry::new();
+        let mut sched = Scheduler::new();
+        let pid = sched.spawn(vec![]);
+        let channel = reg.new_channel(&mut k);
+        let read_only = k.derive(&channel, Rights::READ).unwrap();
+
+        let p = sched.process_mut(pid).unwrap();
+        assert_eq!(reg.receive(&k, &channel, p).unwrap(), None);
+        assert!(reg.send(&mut k, &read_only, p, vec![], 0).is_err());
+        assert_eq!(p.clock().lamport(), 0);
     }
 
     #[test]
