@@ -4,6 +4,8 @@
 
 mod process;
 mod scheduler;
+mod transfer;
 
 pub use process::{Handle, Process, ProcessId};
-pub use scheduler::{Grant, ProcessError, Scheduler};
+pub use scheduler::{ProcessError, Scheduler};
+pub use transfer::{apply_transfers, resolve_grants, Grant, GrantError};

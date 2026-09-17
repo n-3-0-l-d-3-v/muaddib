@@ -8,29 +8,19 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use capability::{CapError, Capability, Kernel, Rights};
+use capability::{Capability, Kernel};
 
-use crate::process::{Handle, Process, ProcessId};
+use crate::process::{Process, ProcessId};
+use crate::transfer::{apply_transfers, resolve_grants, GrantError};
 
-/// One capability to hand to a child being spawned.
-#[derive(Debug, Clone, Copy)]
-pub enum Grant {
-    /// Move the parent's capability at `Handle` into the child — the
-    /// parent's own handle stops resolving to anything afterward.
-    Transfer(Handle),
-    /// Give the child a `Kernel::derive`d, strictly-weaker-or-equal
-    /// capability; the parent keeps using its own unaffected original.
-    Derive(Handle, Rights),
-}
+pub use crate::transfer::Grant;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ProcessError {
     #[error("process {0:?} does not exist")]
     UnknownProcess(ProcessId),
-    #[error("handle does not exist in the parent's capability table")]
-    UnknownHandle,
     #[error(transparent)]
-    Capability(#[from] CapError),
+    Grant(#[from] GrantError),
 }
 
 pub struct Scheduler {
@@ -95,34 +85,18 @@ impl Scheduler {
             .processes
             .get(&parent)
             .ok_or(ProcessError::UnknownProcess(parent))?;
-
-        let mut resolved: Vec<Capability> = Vec::with_capacity(grants.len());
-        for g in &grants {
-            let cap = match *g {
-                Grant::Transfer(h) => parent_proc
-                    .capability(h)
-                    .ok_or(ProcessError::UnknownHandle)?,
-                Grant::Derive(h, rights) => {
-                    let held = parent_proc
-                        .capability(h)
-                        .ok_or(ProcessError::UnknownHandle)?;
-                    kernel.derive(&held, rights)?
-                }
-            };
-            resolved.push(cap);
-        }
+        let resolved = resolve_grants(kernel, parent_proc, &grants)?;
 
         // Every grant validated; now actually apply. Transfers remove
         // from the parent's table only now, never during validation.
+        apply_transfers(
+            self.processes.get_mut(&parent).expect("checked above"),
+            &grants,
+        );
+
         let child_id = self.fresh_id();
         let mut child = Process::new(child_id);
-        for (g, cap) in grants.into_iter().zip(resolved) {
-            if let Grant::Transfer(h) = g {
-                self.processes
-                    .get_mut(&parent)
-                    .expect("checked above")
-                    .take(h);
-            }
+        for cap in resolved {
             child.grant(cap);
         }
         self.processes.insert(child_id, child);
@@ -132,6 +106,15 @@ impl Scheduler {
 
     pub fn process(&self, id: ProcessId) -> Option<&Process> {
         self.processes.get(&id)
+    }
+
+    /// Mutable access to one process's own table — needed by anything
+    /// that must call `Process::grant`/`take` directly (e.g. `ipc`'s
+    /// `send`/`receive`, which aren't `Scheduler` methods since IPC
+    /// doesn't need to know about scheduling at all, only about
+    /// individual processes' tables).
+    pub fn process_mut(&mut self, id: ProcessId) -> Option<&mut Process> {
+        self.processes.get_mut(&id)
     }
 
     pub fn process_count(&self) -> usize {
@@ -152,6 +135,7 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use capability::{CapError, Rights};
 
     #[test]
     fn spawn_grants_exactly_the_initial_capabilities() {
@@ -223,7 +207,9 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(ProcessError::Capability(CapError::CannotAmplify { .. }))
+            Err(ProcessError::Grant(GrantError::Capability(
+                CapError::CannotAmplify { .. }
+            )))
         ));
         // Nothing should have changed: no child spawned, parent untouched.
         assert_eq!(s.process(parent).unwrap().capability(handle), Some(cap));
@@ -245,7 +231,7 @@ mod tests {
             parent,
             vec![Grant::Transfer(valid_handle), Grant::Transfer(bogus_handle)],
         );
-        assert_eq!(result, Err(ProcessError::UnknownHandle));
+        assert_eq!(result, Err(ProcessError::Grant(GrantError::UnknownHandle)));
         assert_eq!(
             s.process(parent).unwrap().capability(valid_handle),
             Some(cap)
