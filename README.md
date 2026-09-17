@@ -73,6 +73,21 @@ moves, in-flight views, reads and writes. It was mutation-checked by
 deleting the reissue and reverting the revoke fix, and fails in both
 cases. See [ADR-004](docs/design/decisions/ADR-004-memory-ownership.md).
 
+**Ticket 005 (logical clocks) is done.** `crates/clock`: Lamport and
+vector clocks are the kernel's only notion of "when." Every process owns
+a pair of clocks. IPC sends and receives are stamped events, and
+spawning a child counts as a causal send that the child's first event
+receives. Stamps have no public constructor, so a process can't claim
+knowledge of events it never saw. The property tests don't check the
+clocks against themselves: the harness builds the real event graph and
+computes happened-before by reachability, then requires the vector-clock
+order to match it exactly. This runs both for bare clocks and through
+real spawns and channels. No correctness bug turned up, so the tests
+were mutation-checked instead; four separate breakages each fail them.
+The "no wall clock" constraint is now a test too: the build fails if any
+kernel source uses a physical-time API. See
+[ADR-005](docs/design/decisions/ADR-005-logical-clocks.md).
+
 See [tickets/](tickets/) for the live phase-by-phase ticket board and
 [docs/design/](docs/design/) for constraints, invariants and architecture
 decision records.

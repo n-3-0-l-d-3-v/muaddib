@@ -38,7 +38,9 @@ crates/memory       -- memory regions with kernel-enforced ownership
                         check (ticket 004)
 crates/clock        -- logical (Lamport) and vector clocks; the only
                         ordering primitive anything in this kernel is
-                        allowed to use (ticket 005)
+                        allowed to use. Every process owns one; IPC
+                        send/receive and spawn are stamped events
+                        (ticket 005)
 ```
 
 Each crate is usable independently (as sietch's `storage` crate proved
@@ -63,6 +65,13 @@ pattern.
   `Grant::Move` is exclusive: afterward the delivered capability is the
   *only* live one for the object, however many copies anyone kept
   (ADR-004, model-based property test).
+- **Causality, not time**: for any two events, `happened_before` on
+  their stamps holds exactly when the first causally precedes the second
+  in the real event graph, and Lamport time strictly increases along
+  every causal path (ADR-005, property-tested against a ground-truth
+  graph, through real spawns and IPC).
+- **No physical time**: no kernel source uses a physical-time API
+  (enforced by `clock/tests/no_wall_clock.rs`).
 
 ## What this is not
 
