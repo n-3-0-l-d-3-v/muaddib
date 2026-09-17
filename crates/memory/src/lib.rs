@@ -118,6 +118,40 @@ impl RegionRegistry {
         Ok(())
     }
 
+    /// Runs `f` over the region's bytes in place, without copying. `cap`
+    /// must grant `READ`. The borrow can't outlive the call, so no
+    /// reference to region memory survives a later ownership move.
+    pub fn inspect<R>(
+        &self,
+        kernel: &Kernel,
+        cap: &Capability,
+        f: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, MemoryError> {
+        kernel.check(cap, Rights::READ)?;
+        let bytes = self
+            .regions
+            .get(&cap.object())
+            .ok_or(MemoryError::UnknownRegion(cap.object()))?;
+        Ok(f(bytes))
+    }
+
+    /// Runs `f` over the region's bytes mutably, in place. `cap` must grant
+    /// both `READ` and `WRITE` (`f` sees the current contents). As with
+    /// `inspect`, the borrow is scoped to the call.
+    pub fn update<R>(
+        &mut self,
+        kernel: &Kernel,
+        cap: &Capability,
+        f: impl FnOnce(&mut [u8]) -> R,
+    ) -> Result<R, MemoryError> {
+        kernel.check(cap, Rights::READ | Rights::WRITE)?;
+        let bytes = self
+            .regions
+            .get_mut(&cap.object())
+            .ok_or(MemoryError::UnknownRegion(cap.object()))?;
+        Ok(f(bytes))
+    }
+
     /// The region's size in bytes. Needs a live capability but no
     /// particular rights — any holder, even of a `NONE` view, may know how
     /// big the thing it names is.
@@ -198,6 +232,37 @@ mod tests {
             Err(MemoryError::Capability(CapError::InsufficientRights { .. }))
         ));
         assert_eq!(mem.read(&k, &owner, 0, 4), Ok(vec![9; 4]));
+    }
+
+    #[test]
+    fn update_mutates_in_place_and_inspect_sees_it() {
+        let mut k = Kernel::new();
+        let mut mem = RegionRegistry::new();
+        let cap = mem.new_region(&mut k, 4);
+        let sum = mem
+            .update(&k, &cap, |b| {
+                b.copy_from_slice(&[1, 2, 3, 4]);
+                b.iter().map(|&x| x as u32).sum::<u32>()
+            })
+            .unwrap();
+        assert_eq!(sum, 10);
+        assert_eq!(mem.inspect(&k, &cap, |b| b.to_vec()), Ok(vec![1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn update_needs_read_and_write_and_inspect_needs_read() {
+        let mut k = Kernel::new();
+        let mut mem = RegionRegistry::new();
+        let owner = mem.new_region(&mut k, 2);
+        let write_only = k.derive(&owner, Rights::WRITE).unwrap();
+        let read_only = k.derive(&owner, Rights::READ).unwrap();
+
+        let mut ran = false;
+        assert!(mem.update(&k, &write_only, |_| ran = true).is_err());
+        assert!(mem.update(&k, &read_only, |_| ran = true).is_err());
+        assert!(mem.inspect(&k, &write_only, |_| ran = true).is_err());
+        assert!(!ran, "closure must not run without authority");
+        assert_eq!(mem.inspect(&k, &read_only, |b| b.len()), Ok(2));
     }
 
     #[test]
