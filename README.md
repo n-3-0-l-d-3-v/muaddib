@@ -28,6 +28,18 @@ right its parent lacked, for arbitrary rights combinations. 16 unit
 tests plus 4 property tests. See
 [ADR-001](docs/design/decisions/ADR-001-capability-model.md).
 
+**Ticket 002 (processes and scheduler) is done.** `crates/process`: a
+`Process` indexes its capabilities by small local `Handle`s — a real
+OS's file-descriptor-table pattern, applied to capabilities generally.
+`Scheduler::spawn_child` hands a child *only* the capabilities its
+caller explicitly names (transferred or attenuated via `derive`),
+validated all-or-nothing before any of them are applied — never "child
+inherits everything the parent can see." The scheduler's only notion of
+order is FIFO ready-queue position; nothing resembling a clock exists
+anywhere in it. 12 unit tests plus 2 property tests, proven for
+arbitrary rights combinations and transfer-chain lengths. See
+[ADR-002](docs/design/decisions/ADR-002-processes-and-scheduling.md).
+
 See [tickets/](tickets/) for the live phase-by-phase ticket board and
 [docs/design/](docs/design/) for constraints, invariants and architecture
 decision records.
