@@ -114,12 +114,19 @@ impl Kernel {
     /// before this call — including `cap` itself, which becomes just as
     /// unusable as any copy of it anyone else was holding, since none of
     /// them are tracked individually.
+    ///
+    /// `cap` must itself be **live** and hold `DESTROY`: revoking every
+    /// outstanding capability for an object is the same class of power
+    /// as destroying it. Before ticket 004 this checked only that the
+    /// object existed — so a `NONE`-rights derived view could revoke its
+    /// own owner, and an already-revoked capability could revoke again
+    /// (see `docs/design/decisions/ADR-004-memory-ownership.md`).
     pub fn revoke(&mut self, cap: &Capability) -> Result<(), CapError> {
-        let epoch = self
+        self.check(cap, Rights::DESTROY)?;
+        *self
             .epochs
             .get_mut(&cap.object)
-            .ok_or(CapError::UnknownObject(cap.object))?;
-        *epoch += 1;
+            .expect("check just confirmed the object exists") += 1;
         Ok(())
     }
 
@@ -197,7 +204,7 @@ mod tests {
     #[test]
     fn revoke_invalidates_every_capability_for_that_object() {
         let mut k = Kernel::new();
-        let cap = k.new_object(Rights::READ);
+        let cap = k.new_object(Rights::READ | Rights::DESTROY);
         let cap_copy = cap; // Capability is Copy — this models "another holder's copy"
         k.revoke(&cap).unwrap();
         assert_eq!(
@@ -213,7 +220,7 @@ mod tests {
     #[test]
     fn revoke_does_not_affect_other_objects() {
         let mut k = Kernel::new();
-        let cap_a = k.new_object(Rights::READ);
+        let cap_a = k.new_object(Rights::READ | Rights::DESTROY);
         let cap_b = k.new_object(Rights::READ);
         k.revoke(&cap_a).unwrap();
         assert_eq!(k.check(&cap_b, Rights::READ), Ok(()));
@@ -259,12 +266,48 @@ mod tests {
     #[test]
     fn derive_from_a_revoked_capability_fails() {
         let mut k = Kernel::new();
-        let cap = k.new_object(Rights::READ | Rights::GRANT);
+        let cap = k.new_object(Rights::READ | Rights::GRANT | Rights::DESTROY);
         k.revoke(&cap).unwrap();
         assert_eq!(
             k.derive(&cap, Rights::READ),
             Err(CapError::Revoked(cap.object()))
         );
+    }
+
+    #[test]
+    fn revoke_requires_destroy_right() {
+        let mut k = Kernel::new();
+        let cap = k.new_object(Rights::READ | Rights::GRANT);
+        assert_eq!(
+            k.revoke(&cap),
+            Err(CapError::InsufficientRights {
+                object: cap.object(),
+                held: Rights::READ | Rights::GRANT,
+                required: Rights::DESTROY,
+            })
+        );
+        assert_eq!(k.check(&cap, Rights::READ), Ok(()));
+    }
+
+    #[test]
+    fn a_weaker_derived_view_cannot_revoke_its_owner() {
+        let mut k = Kernel::new();
+        let owner = k.new_object(Rights::ALL);
+        let view = k.derive(&owner, Rights::READ).unwrap();
+        assert!(k.revoke(&view).is_err());
+        assert_eq!(k.check(&owner, Rights::ALL), Ok(()));
+    }
+
+    #[test]
+    fn a_revoked_capability_cannot_revoke_again() {
+        let mut k = Kernel::new();
+        let old = k.new_object(Rights::ALL);
+        k.revoke(&old).unwrap();
+        // A second revoke with the stale capability must not be able to
+        // bump the epoch again (which would kill any capability issued
+        // at the new epoch — exactly how an old owner could sabotage a
+        // new one after an ownership transfer).
+        assert_eq!(k.revoke(&old), Err(CapError::Revoked(old.object())));
     }
 
     #[test]

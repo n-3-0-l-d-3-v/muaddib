@@ -38,7 +38,7 @@ proptest! {
         required in arb_rights(),
     ) {
         let mut k = Kernel::new();
-        let cap = k.new_object(created);
+        let cap = k.new_object(created | Rights::DESTROY); // revoke requires DESTROY
         let was_valid = k.check(&cap, required).is_ok();
 
         k.revoke(&cap).unwrap();
@@ -58,7 +58,7 @@ proptest! {
     #[test]
     fn revocation_does_not_leak_to_other_objects(rights in arb_rights()) {
         let mut k = Kernel::new();
-        let cap_a = k.new_object(rights);
+        let cap_a = k.new_object(rights | Rights::DESTROY);
         let cap_b = k.new_object(rights);
         k.revoke(&cap_a).unwrap();
         prop_assert_eq!(k.check(&cap_b, rights), Ok(()));
@@ -116,5 +116,29 @@ proptest! {
 
         prop_assert!(root.rights().contains(second.rights()));
         prop_assert!(first.rights().contains(second.rights()));
+    }
+
+    /// Revocation authority can't be forged by attenuation: for any
+    /// derived view, `revoke` succeeds iff the view holds `DESTROY`, and a
+    /// rejected attempt leaves the owner's capability fully usable.
+    #[test]
+    fn only_a_live_destroy_holding_capability_can_revoke(
+        owner_rights in arb_rights(),
+        view_rights in arb_rights(),
+    ) {
+        let mut k = Kernel::new();
+        let owner = k.new_object(owner_rights | Rights::GRANT);
+        let Ok(view) = k.derive(&owner, view_rights) else {
+            return Ok(());
+        };
+        let result = k.revoke(&view);
+        if view_rights.contains(Rights::DESTROY) {
+            prop_assert_eq!(result, Ok(()));
+            // Now stale: can never revoke a second time.
+            prop_assert_eq!(k.revoke(&view), Err(CapError::Revoked(view.object())));
+        } else {
+            prop_assert!(result.is_err());
+            prop_assert_eq!(k.check(&owner, owner.rights()), Ok(()));
+        }
     }
 }
