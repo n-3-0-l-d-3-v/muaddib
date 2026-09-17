@@ -15,3 +15,11 @@ thiserror.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 
+
+[[bin]]
+name = "muaddib-chaos"
+path = "src/bin/muaddib-chaos.rs"
+
+[[bin]]
+name = "muaddib-pipeline"
+path = "src/bin/muaddib-pipeline.rs"
