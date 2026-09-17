@@ -13,7 +13,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use capability::{CapError, Capability, Kernel, ObjectId, Rights};
-use process::{apply_grants, resolve_grants, Grant, GrantError, Process, Stamp};
+use process::{apply_grants, resolve_grants, Grant, GrantError, Handle, Process, Stamp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
@@ -30,6 +30,10 @@ pub struct Message {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Delivery {
     pub data: i64,
+    /// The receiver-local handles the message's capabilities were granted
+    /// under, in the order the sender's grants named them. Without this a
+    /// receiver would have to guess which of its handles are new.
+    pub handles: Vec<Handle>,
     /// The send event's stamp, as recorded at the sender.
     pub sent_at: Stamp,
     /// The receive event's stamp, as recorded at the receiver. Always
@@ -136,12 +140,15 @@ impl ChannelRegistry {
         let Some(message) = queue.pop_front() else {
             return Ok(None);
         };
-        for cap in message.capabilities {
-            receiver.grant(cap);
-        }
+        let handles = message
+            .capabilities
+            .into_iter()
+            .map(|cap| receiver.grant(cap))
+            .collect();
         let received_at = receiver.record_receive(&message.sent_at);
         Ok(Some(Delivery {
             data: message.data,
+            handles,
             sent_at: message.sent_at,
             received_at,
         }))
@@ -265,10 +272,10 @@ mod tests {
 
         let receiver = sched.process_mut(receiver_id).unwrap();
         assert_eq!(receiver.handle_count(), 0);
-        reg.receive(&k, &channel, receiver).unwrap();
+        let delivery = reg.receive(&k, &channel, receiver).unwrap().unwrap();
         assert_eq!(receiver.handle_count(), 1);
-        let received_handle = receiver.handles().next().unwrap();
-        assert_eq!(receiver.capability(received_handle), Some(payload_cap));
+        assert_eq!(delivery.handles.len(), 1);
+        assert_eq!(receiver.capability(delivery.handles[0]), Some(payload_cap));
     }
 
     #[test]
