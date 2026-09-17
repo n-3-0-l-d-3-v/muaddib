@@ -16,14 +16,33 @@ pub use vector::{Causality, VectorClock};
 
 /// The logical timestamp of one event: which process it happened at, its
 /// Lamport time, and its vector time.
+///
+/// **No public constructor**, for the same reason `capability::Capability`
+/// has none: a stamp is evidence of causal knowledge, and `receive_event`
+/// merges whatever a stamp claims. If callers could build one from
+/// arbitrary numbers, a process could claim to have seen events it never
+/// saw. The only source of a `Stamp` is an `EventClock` event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stamp<K: Ord + Copy> {
-    pub process: K,
-    pub lamport: u64,
-    pub vector: VectorClock<K>,
+    process: K,
+    lamport: u64,
+    vector: VectorClock<K>,
 }
 
 impl<K: Ord + Copy> Stamp<K> {
+    /// The process the event happened at.
+    pub fn process(&self) -> K {
+        self.process
+    }
+
+    pub fn lamport(&self) -> u64 {
+        self.lamport
+    }
+
+    pub fn vector(&self) -> &VectorClock<K> {
+        &self.vector
+    }
+
     /// Lamport's total order: Lamport time, ties broken by process id.
     /// Consistent with causality (if `a` happened before `b`, `a`'s key is
     /// smaller) but it also orders concurrent events, arbitrarily.
@@ -100,7 +119,7 @@ mod tests {
         let sent = a.send_event();
         let received = b.receive_event(&sent);
         assert!(sent.happened_before(&received));
-        assert!(sent.lamport < received.lamport);
+        assert!(sent.lamport() < received.lamport());
     }
 
     #[test]
@@ -112,7 +131,7 @@ mod tests {
         let b2 = b.local_event();
         assert_eq!(a1.causality(&b2), Causality::Concurrent);
         // Lamport alone would have suggested an order that isn't causal.
-        assert!(a1.lamport < b2.lamport);
+        assert!(a1.lamport() < b2.lamport());
     }
 
     #[test]
@@ -121,7 +140,7 @@ mod tests {
         let mut b = EventClock::new(1u32);
         let a1 = a.local_event();
         let b1 = b.local_event();
-        assert_eq!(a1.lamport, b1.lamport);
+        assert_eq!(a1.lamport(), b1.lamport());
         assert!(a1.total_order_key() < b1.total_order_key());
     }
 
@@ -129,7 +148,7 @@ mod tests {
     fn current_before_any_event_is_all_zero() {
         let c = EventClock::new(3u32);
         let s = c.current();
-        assert_eq!(s.lamport, 0);
-        assert_eq!(s.vector, VectorClock::new());
+        assert_eq!(s.lamport(), 0);
+        assert_eq!(s.vector(), &VectorClock::new());
     }
 }

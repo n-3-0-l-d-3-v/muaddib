@@ -155,7 +155,7 @@ proptest! {
                     "event {} vs {}", i, j
                 );
                 if truly_before {
-                    prop_assert!(stamps[i].lamport < stamps[j].lamport);
+                    prop_assert!(stamps[i].lamport() < stamps[j].lamport());
                     prop_assert!(stamps[i].total_order_key() < stamps[j].total_order_key());
                 }
                 let concurrent = !reach[i][j] && !reach[j][i];
