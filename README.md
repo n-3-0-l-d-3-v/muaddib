@@ -54,6 +54,25 @@ received capability can never exceed what the sender held, for
 arbitrary rights and arbitrary-length relay chains across multiple
 channels. See [ADR-003](docs/design/decisions/ADR-003-ipc.md).
 
+**Ticket 004 (memory ownership) is done — CORE scope is complete.**
+`crates/memory`: regions named only by capability, with ownership
+transfer the kernel actually enforces. Checking ADR-003's prediction
+("no new transfer mechanism needed") against the code showed it was
+wrong: `Grant::Transfer` only empties a table slot, and since
+capabilities are `Copy`, a process that kept a copy still had full
+access. The fix is `Grant::Move`, backed by a new `Kernel::reissue`
+(revoke every outstanding capability, mint exactly one fresh one,
+delivered straight into the message so the sender never sees it). It
+works through both IPC and spawn, for any object kind. Building it
+exposed two older bugs, both fixed: `Kernel::revoke` required no rights
+and not even a live capability (a stale old owner could have revoked
+the *new* owner), and a handle transferred twice in one batch was
+delivered twice. The property test is model-based: every capability
+any process ever held is kept and replayed at random across arbitrary
+moves, in-flight views, reads and writes. It was mutation-checked by
+deleting the reissue and reverting the revoke fix, and fails in both
+cases. See [ADR-004](docs/design/decisions/ADR-004-memory-ownership.md).
+
 See [tickets/](tickets/) for the live phase-by-phase ticket board and
 [docs/design/](docs/design/) for constraints, invariants and architecture
 decision records.

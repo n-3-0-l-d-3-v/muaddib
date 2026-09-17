@@ -32,9 +32,10 @@ crates/process      -- tasks/processes, each with its own capability
 crates/ipc          -- message-passing channels; capabilities themselves
                         are transferable message payloads (ticket 003)
 crates/memory       -- memory regions with kernel-enforced ownership
-                        transfer (not just Rust's own compile-time
-                        ownership — a runtime transfer op checked
-                        against the capability holding it) (ticket 004)
+                        transfer: process::Grant::Move reissues the
+                        region's capability (Kernel::reissue), so every
+                        copy the old owner kept fails every access
+                        check (ticket 004)
 crates/clock        -- logical (Lamport) and vector clocks; the only
                         ordering primitive anything in this kernel is
                         allowed to use (ticket 005)
@@ -47,6 +48,21 @@ passing memory ownership and channel capabilities through IPC, causally
 ordered without ever touching a wall clock) plus differential/benchmark
 coverage, mirroring every other subsystem in this ecosystem's closing
 pattern.
+
+## Invariants (as proven so far)
+
+- **Unforgeable**: `Capability` has no public constructor (ADR-001).
+- **Attenuation only**: a derived capability never holds a right its
+  parent lacked (ADR-001, property-tested).
+- **Revocation authority**: only a *live* capability holding `DESTROY`
+  can revoke or reissue an object (ADR-004, property-tested).
+- **No ambient authority**: a process holds only what it was explicitly
+  granted, at spawn or over IPC (ADR-002, ADR-003).
+- **Two kinds of handoff**: `Grant::Transfer` hands over one copy and
+  leaves other holders working (for shared objects like channels).
+  `Grant::Move` is exclusive: afterward the delivered capability is the
+  *only* live one for the object, however many copies anyone kept
+  (ADR-004, model-based property test).
 
 ## What this is not
 
