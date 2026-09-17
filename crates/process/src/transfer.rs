@@ -10,6 +10,8 @@
 //! silently drifting apart, per this project's usual "found this while
 //! building the next thing" honesty.
 
+use std::collections::HashSet;
+
 use capability::{CapError, Capability, Kernel, Rights};
 
 use crate::process::{Handle, Process};
@@ -29,6 +31,8 @@ pub enum Grant {
 pub enum GrantError {
     #[error("handle does not exist in the source process's capability table")]
     UnknownHandle,
+    #[error("handle {0:?} is transferred more than once in the same batch")]
+    DuplicateTransfer(Handle),
     #[error(transparent)]
     Capability(#[from] CapError),
 }
@@ -46,7 +50,17 @@ pub fn resolve_grants(
     grants: &[Grant],
 ) -> Result<Vec<Capability>, GrantError> {
     let mut resolved = Vec::with_capacity(grants.len());
+    let mut transferred = HashSet::new();
     for g in grants {
+        // A handle can only leave the table once: `apply_transfers`
+        // removes it once, so resolving it twice would hand the
+        // destination two copies of a capability the source only gave up
+        // one of.
+        if let Grant::Transfer(h) = *g {
+            if !transferred.insert(h) {
+                return Err(GrantError::DuplicateTransfer(h));
+            }
+        }
         let cap = match *g {
             Grant::Transfer(h) => source.capability(h).ok_or(GrantError::UnknownHandle)?,
             Grant::Derive(h, rights) => {
@@ -107,6 +121,34 @@ mod tests {
 
         assert_eq!(p.capability(handle_a), None); // transferred away
         assert_eq!(p.capability(handle_b), Some(cap_b)); // derive doesn't touch the source
+    }
+
+    #[test]
+    fn transferring_the_same_handle_twice_in_one_batch_is_rejected() {
+        let mut k = Kernel::new();
+        let mut p = Process::new(ProcessId(0));
+        let handle = p.grant(k.new_object(Rights::READ));
+
+        let result = resolve_grants(&k, &p, &[Grant::Transfer(handle), Grant::Transfer(handle)]);
+        assert_eq!(result, Err(GrantError::DuplicateTransfer(handle)));
+    }
+
+    #[test]
+    fn deriving_twice_from_one_handle_is_still_allowed() {
+        let mut k = Kernel::new();
+        let mut p = Process::new(ProcessId(0));
+        let handle = p.grant(k.new_object(Rights::READ | Rights::WRITE | Rights::GRANT));
+
+        let resolved = resolve_grants(
+            &k,
+            &p,
+            &[
+                Grant::Derive(handle, Rights::READ),
+                Grant::Derive(handle, Rights::WRITE),
+            ],
+        )
+        .unwrap();
+        assert_eq!(resolved.len(), 2);
     }
 
     #[test]
