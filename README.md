@@ -13,7 +13,20 @@ repo commit-for-commit.
 
 ## Status
 
-**Phase 4 — QUEUED**
+**Phase 4 — ACTIVE.** See [docs/design/KERNEL.md](docs/design/KERNEL.md)
+for the full architecture (capability model -> processes -> IPC ->
+memory ownership -> logical clocks) and what this simulation deliberately
+is and isn't.
+
+**Ticket 001 (capability model) is done.** `crates/capability`:
+unforgeable capabilities (no public constructor — Rust's own privacy
+system is the unforgeability guarantee, not a runtime check), epoch-
+based revocation (invalidates every outstanding capability for an
+object with no holder-tracking needed), and attenuation-only derivation
+— proven, not just asserted, that a derived capability can never hold a
+right its parent lacked, for arbitrary rights combinations. 16 unit
+tests plus 4 property tests. See
+[ADR-001](docs/design/decisions/ADR-001-capability-model.md).
 
 See [tickets/](tickets/) for the live phase-by-phase ticket board and
 [docs/design/](docs/design/) for constraints, invariants and architecture
@@ -34,8 +47,8 @@ Capability passing, IPC, logical/vector clocks for ordering, and object-referenc
 ## Sibling repositories
 
 - [mentat](https://github.com/n-3-0-l-d-3-v/mentat) — THE MACHINE (COMPLETE)
-- [chakobsa](https://github.com/n-3-0-l-d-3-v/chakobsa) — THE LANGUAGE (QUEUED)
-- [sietch](https://github.com/n-3-0-l-d-3-v/sietch) — THE VAULT (ACTIVE)
+- [chakobsa](https://github.com/n-3-0-l-d-3-v/chakobsa) — THE LANGUAGE (COMPLETE)
+- [sietch](https://github.com/n-3-0-l-d-3-v/sietch) — THE VAULT (COMPLETE)
 - [choam](https://github.com/n-3-0-l-d-3-v/choam) — THE DATABASE (QUEUED)
 - [distrans](https://github.com/n-3-0-l-d-3-v/distrans) — THE WIRE (QUEUED)
 - [landsraad](https://github.com/n-3-0-l-d-3-v/landsraad) — THE COLONY (QUEUED)
