@@ -5,6 +5,7 @@ members = [
     "crates/process",
     "crates/ipc",
     "crates/memory",
+    "crates/clock",
 ]
 
 [workspace.package]
