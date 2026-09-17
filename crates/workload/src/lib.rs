@@ -15,6 +15,7 @@
 //! See `docs/design/decisions/ADR-006-integration-and-benchmarks.md`.
 
 pub mod baseline;
+pub mod chaos;
 pub mod data;
 pub mod pipeline;
 pub mod rng;
