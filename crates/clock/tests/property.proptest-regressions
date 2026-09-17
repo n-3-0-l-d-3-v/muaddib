@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 54c6b5bb1f4f90ee8da0e1a7d3efa835f8e664181b0c307809970a1595eb6c4b # shrinks to ops = [Send { from: 0, to: 2 }, Receive(2)]
