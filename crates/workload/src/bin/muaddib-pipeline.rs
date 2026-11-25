@@ -11,6 +11,10 @@ use std::process::ExitCode;
 use workload::data::reference_checksum;
 use workload::{run_kernel_pipeline, PipelineConfig};
 
+const USAGE: &str = "usage: muaddib-pipeline [--batches N] [--stages S] [--pool P] [--region-size B] [--seed X] [--trace]
+  runs a least-privilege processing pipeline on the capability kernel and checks
+  every batch against a reference; --trace prints events in Lamport order";
+
 fn main() -> ExitCode {
     let mut config = PipelineConfig {
         batches: 8,
@@ -22,12 +26,19 @@ fn main() -> ExitCode {
     };
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
+        if flag == "-h" || flag == "--help" {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
         if flag == "--trace" {
             config.trace = true;
             continue;
         }
         let Some(Ok(value)) = args.next().map(|v| v.parse::<u64>()) else {
-            eprintln!("error: {flag} needs a numeric value");
+            eprintln!(
+                "error: {flag} needs a numeric value
+{USAGE}"
+            );
             return ExitCode::from(2);
         };
         match flag.as_str() {
@@ -37,7 +48,10 @@ fn main() -> ExitCode {
             "--region-size" => config.region_size = value as usize,
             "--seed" => config.seed = value,
             other => {
-                eprintln!("error: unknown argument {other}");
+                eprintln!(
+                    "error: unknown argument {other}
+{USAGE}"
+                );
                 return ExitCode::from(2);
             }
         }
